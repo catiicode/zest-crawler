@@ -2,6 +2,8 @@
 
 GeoGebra 资源批量下载工具。从 GeoGebra 的资源集合页、用户主页或单个资源页自动发现并下载 `.ggb` 文件，同时导出 CSV 格式的元数据。
 
+提供 CLI 和 GUI 两种使用方式。支持构建为 Windows 便携包，解压即用，无需安装 Python。
+
 ## 工作原理
 
 1. **页面分析** — 使用 Playwright 打开 GeoGebra 页面，从 DOM 中提取所有资源链接
@@ -44,13 +46,32 @@ pip install -e ".[dev]"     # 安装开发依赖
 
 ```bash
 uv run playwright install chromium
-# 或
-playwright install chromium
+```
+
+如果需要代理才能下载，先设置环境变量：
+
+```bash
+set HTTPS_PROXY=http://127.0.0.1:7890
+uv run playwright install chromium
 ```
 
 ## 使用说明
 
-### 基本用法
+### GUI 模式
+
+```bash
+uv run python -m zest_crawler.gui
+```
+
+或通过入口点启动：
+
+```bash
+uv run zest-crawler-gui
+```
+
+在界面中填入资源地址、选择保存目录，点击"开始下载"即可。
+
+### CLI 模式
 
 ```bash
 uv run zest-crawler download <URL>
@@ -65,7 +86,7 @@ uv run zest-crawler download <URL>
 | 单个资源 | `https://www.geogebra.org/m/<id>` | `https://www.geogebra.org/m/gvu6wrmv` |
 | 短链接 | `https://ggbm.at/<id>` | `https://ggbm.at/wy53ufy2` |
 
-### 命令行选项
+### CLI 命令行选项
 
 ```
 zest-crawler [--verbose/-v] download <URL> [选项]
@@ -112,7 +133,7 @@ uv run zest-crawler download https://www.geogebra.org/m/urufsydt --concurrency 1
 2. **环境变量**：设置 `HTTPS_PROXY` 或 `HTTP_PROXY`，工具会自动检测
 
 ```bash
-export HTTPS_PROXY=http://127.0.0.1:7890
+set HTTPS_PROXY=http://127.0.0.1:7890
 uv run zest-crawler download https://www.geogebra.org/m/wy53ufy2
 ```
 
@@ -140,6 +161,48 @@ output/
 | `filename` | 本地文件名 |
 | `download_time` | 下载时间 (UTC) |
 
+## 构建便携包
+
+构建 Windows 便携包（无需 Python 环境，解压即用）：
+
+### 1. 安装构建依赖
+
+```bash
+uv sync --extra build
+```
+
+### 2. 运行构建脚本
+
+```bash
+uv run python scripts/build_portable.py
+```
+
+如果下载 Chromium 需要代理：
+
+```bash
+uv run python scripts/build_portable.py --proxy http://127.0.0.1:7890
+```
+
+如果 Chromium 已经安装过，可跳过下载步骤：
+
+```bash
+uv run python scripts/build_portable.py --skip-browser
+```
+
+### 3. 输出
+
+构建完成后产物位于：
+
+```
+dist/
+├── zest-crawler/              # PyInstaller 输出目录
+│   ├── zest-crawler.exe       # 双击运行
+│   └── _internal/             # 运行时依赖
+└── zest-crawler-portable.zip  # 便携包（分发用）
+```
+
+将 `zest-crawler-portable.zip` 发送给用户，解压后双击 `zest-crawler.exe` 即可使用。
+
 ## 开发
 
 ### 运行测试
@@ -156,6 +219,7 @@ zest-crawler/
 ├── src/zest_crawler/
 │   ├── __init__.py
 │   ├── cli.py          # CLI 入口 (click)
+│   ├── gui.py          # GUI 入口 (tkinter)
 │   ├── models.py       # 数据模型
 │   ├── router.py       # URL 解析与路由
 │   ├── analyzer.py     # Playwright 页面分析器
@@ -163,12 +227,14 @@ zest-crawler/
 │   └── storage.py      # 文件保存与 CSV 导出
 ├── tests/              # 单元测试
 ├── scripts/
-│   └── debug_page.py   # 页面调试脚本
+│   ├── build_portable.py  # 便携包构建脚本
+│   └── debug_page.py     # 页面调试脚本
 ├── docs/plans/         # 设计文档
+├── zest-crawler.spec   # PyInstaller 配置
 └── pyproject.toml
 ```
 
-### 构建
+### Python 包构建
 
 ```bash
 uv build
