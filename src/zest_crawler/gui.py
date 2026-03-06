@@ -57,14 +57,19 @@ class App(tk.Tk):
         ttk.Label(form, text="代理地址:").grid(row=2, column=0, sticky=tk.W, pady=3)
         self.proxy_entry = ttk.Entry(form)
         self.proxy_entry.grid(row=2, column=1, sticky=tk.EW, padx=(5, 0), pady=3)
+        self.proxy_entry.insert(0, "http://127.0.0.1:62340")
 
-        # Row 3: Concurrency + headless checkbox
+        # Row 3: Concurrency + timeout + headless
         ttk.Label(form, text="并发数:").grid(row=3, column=0, sticky=tk.W, pady=3)
         opt_frame = ttk.Frame(form)
         opt_frame.grid(row=3, column=1, sticky=tk.W, padx=(5, 0), pady=3)
         self.concurrency_var = tk.IntVar(value=2)
         ttk.Spinbox(opt_frame, from_=1, to=5, width=4,
                     textvariable=self.concurrency_var).pack(side=tk.LEFT)
+        ttk.Label(opt_frame, text="超时(秒):").pack(side=tk.LEFT, padx=(20, 0))
+        self.timeout_var = tk.IntVar(value=60)
+        ttk.Spinbox(opt_frame, from_=30, to=300, width=5, increment=10,
+                    textvariable=self.timeout_var).pack(side=tk.LEFT, padx=(5, 0))
         self.headless_var = tk.IntVar(value=0)
         ttk.Checkbutton(opt_frame, text="显示浏览器窗口",
                         variable=self.headless_var).pack(side=tk.LEFT, padx=(20, 0))
@@ -78,6 +83,8 @@ class App(tk.Tk):
         self.stop_btn = ttk.Button(btn_frame, text="停止",
                                    command=self._on_stop, state=tk.DISABLED)
         self.stop_btn.pack(side=tk.LEFT)
+        ttk.Button(btn_frame, text="清除日志",
+                   command=self._clear_log).pack(side=tk.RIGHT)
 
         # Progress bar
         self.progress_bar = ttk.Progressbar(self, mode="determinate")
@@ -104,6 +111,12 @@ class App(tk.Tk):
         self.log_text.configure(state=tk.NORMAL)
         self.log_text.insert(tk.END, message + "\n")
         self.log_text.see(tk.END)
+        self.log_text.configure(state=tk.DISABLED)
+
+    def _clear_log(self) -> None:
+        """Clear all log content."""
+        self.log_text.configure(state=tk.NORMAL)
+        self.log_text.delete("1.0", tk.END)
         self.log_text.configure(state=tk.DISABLED)
 
     def _set_downloading(self, active: bool) -> None:
@@ -135,6 +148,7 @@ class App(tk.Tk):
         output_dir = self.output_entry.get().strip() or "./output"
         proxy = self.proxy_entry.get().strip() or None
         concurrency = self.concurrency_var.get()
+        timeout = self.timeout_var.get() * 1000  # seconds -> milliseconds
         headless = self.headless_var.get() == 0  # unchecked = headless
 
         self._set_downloading(True)
@@ -144,7 +158,7 @@ class App(tk.Tk):
 
         try:
             # Step 1: Analyze
-            analyzer = GeoGebraAnalyzer(headless=headless, proxy=proxy)
+            analyzer = GeoGebraAnalyzer(headless=headless, proxy=proxy, timeout=timeout)
             resources = await analyzer.analyze(parsed)
 
             if not resources:
@@ -158,7 +172,7 @@ class App(tk.Tk):
             storage = Storage(output_dir=Path(output_dir) / subdir)
             storage.ensure_dir()
 
-            # Step 2: Download
+            # Step 2: Download and save one by one
             self.progress_bar["maximum"] = len(resources)
             self.progress_label.configure(text=f"正在下载 0/{len(resources)}")
 
@@ -166,18 +180,21 @@ class App(tk.Tk):
                 concurrency=concurrency,
                 headless=headless,
                 proxy=proxy,
+                timeout=timeout,
             )
 
-            material_ids = [r.material_id for r in resources]
-            results = await downloader.download_many(material_ids)
-
-            # Step 3: Save
             now = datetime.now(timezone.utc).isoformat()
             success_count = 0
-            for i, (resource, result) in enumerate(zip(resources, results), start=1):
+            material_ids = [r.material_id for r in resources]
+            i = 0
+
+            async for result in downloader.download_iter(material_ids):
                 if self._cancel_requested:
                     self.log("已停止下载。")
                     break
+
+                i += 1
+                resource = resources[i - 1]
 
                 if result.success and result.content:
                     filename = storage.make_filename(i, resource.title)
@@ -197,7 +214,7 @@ class App(tk.Tk):
                     text=f"正在下载 {i}/{len(resources)}"
                 )
 
-            # Step 4: Metadata
+            # Step 3: Metadata
             storage.write_metadata(resources)
             self.log(
                 f"\n完成! {success_count}/{len(resources)} 个文件已保存到"

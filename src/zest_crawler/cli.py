@@ -98,8 +98,8 @@ async def _download_async(
     storage = Storage(output_dir=Path(output_dir) / subdir_name)
     storage.ensure_dir()
 
-    # Step 2: Download .ggb files via Playwright (getBase64)
-    click.echo(f"Downloading .ggb files (concurrency={concurrency})...")
+    # Step 2: Download .ggb files one at a time, saving each immediately
+    click.echo(f"Downloading .ggb files (one at a time)...")
     click.echo("  Each file is exported via GeoGebra Classic's getBase64() API.")
 
     downloader = Downloader(
@@ -110,12 +110,13 @@ async def _download_async(
     )
 
     material_ids = [r.material_id for r in resources]
-    results = await downloader.download_many(material_ids)
-
-    # Step 3: Save files and update metadata
     now = datetime.now(timezone.utc).isoformat()
     success_count = 0
-    for i, (resource, result) in enumerate(zip(resources, results), start=1):
+    i = 0
+
+    async for result in downloader.download_iter(material_ids):
+        i += 1
+        resource = resources[i - 1]
         if result.success and result.content:
             filename = storage.make_filename(i, resource.title)
             storage.save_file(filename, result.content)
