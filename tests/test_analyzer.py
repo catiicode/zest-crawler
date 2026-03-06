@@ -8,6 +8,11 @@ def test_analyzer_init():
     assert analyzer.headless is True
 
 
+def test_analyzer_init_with_proxy():
+    analyzer = GeoGebraAnalyzer(headless=True, proxy="http://127.0.0.1:7890")
+    assert analyzer.proxy == "http://127.0.0.1:7890"
+
+
 def test_build_full_url_material():
     parsed = ParsedUrl(url_type=UrlType.SINGLE, identifier="abc123")
     url = GeoGebraAnalyzer.build_full_url(parsed)

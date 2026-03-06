@@ -29,3 +29,5 @@ Thumbs.db
 
 # Project output
 output/
+
+debug_responses.json

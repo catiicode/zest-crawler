@@ -36,16 +36,28 @@ def main(verbose: bool) -> None:
 )
 @click.option(
     "--concurrency", "-c",
-    default=5,
+    default=2,
     type=int,
-    help="Max concurrent downloads (default: 5).",
+    help="Max concurrent downloads (default: 2).",
 )
 @click.option(
     "--headless/--no-headless",
     default=True,
     help="Run browser in headless mode (default: headless).",
 )
-def download(url: str, output: str, concurrency: int, headless: bool) -> None:
+@click.option(
+    "--proxy", "-p",
+    default=None,
+    type=str,
+    help="Proxy server URL (e.g. http://127.0.0.1:7890). Auto-detects from HTTPS_PROXY/HTTP_PROXY env vars if not set.",
+)
+@click.option(
+    "--timeout", "-t",
+    default=60000,
+    type=int,
+    help="Page load timeout in ms (default: 60000).",
+)
+def download(url: str, output: str, concurrency: int, headless: bool, proxy: str | None, timeout: int) -> None:
     """Download GeoGebra resources from a URL.
 
     URL can be a material page (/m/<id>), user page (/u/<username>),
@@ -58,7 +70,7 @@ def download(url: str, output: str, concurrency: int, headless: bool) -> None:
         sys.exit(1)
 
     click.echo(f"Parsed URL: type={parsed.url_type.value}, id={parsed.identifier}")
-    asyncio.run(_download_async(parsed, output, concurrency, headless))
+    asyncio.run(_download_async(parsed, output, concurrency, headless, proxy, timeout))
 
 
 async def _download_async(
@@ -66,11 +78,13 @@ async def _download_async(
     output_dir: str,
     concurrency: int,
     headless: bool,
+    proxy: str | None,
+    timeout: int,
 ) -> None:
     """Async download workflow."""
-    # Step 1: Analyze the page
+    # Step 1: Analyze the page to discover resources
     click.echo("Analyzing page with Playwright...")
-    analyzer = GeoGebraAnalyzer(headless=headless)
+    analyzer = GeoGebraAnalyzer(headless=headless, proxy=proxy, timeout=timeout)
     resources = await analyzer.analyze(parsed_url)
 
     if not resources:
@@ -84,20 +98,19 @@ async def _download_async(
     storage = Storage(output_dir=Path(output_dir) / subdir_name)
     storage.ensure_dir()
 
-    # Step 2: Download files
-    click.echo(f"Downloading with concurrency={concurrency}...")
-    downloader = Downloader(concurrency=concurrency)
+    # Step 2: Download .ggb files via Playwright (getBase64)
+    click.echo(f"Downloading .ggb files (concurrency={concurrency})...")
+    click.echo("  Each file is exported via GeoGebra Classic's getBase64() API.")
 
-    # Build download tasks — use material_id-based URL pattern
-    download_tasks: list[tuple[str, str]] = []
-    for r in resources:
-        download_url = (
-            f"https://www.geogebra.org/material/download"
-            f"/format/file/id/{r.material_id}"
-        )
-        download_tasks.append((download_url, r.material_id))
+    downloader = Downloader(
+        concurrency=concurrency,
+        headless=headless,
+        proxy=proxy,
+        timeout=timeout,
+    )
 
-    results = await downloader.download_many(download_tasks)
+    material_ids = [r.material_id for r in resources]
+    results = await downloader.download_many(material_ids)
 
     # Step 3: Save files and update metadata
     now = datetime.now(timezone.utc).isoformat()
